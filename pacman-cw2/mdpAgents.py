@@ -1,19 +1,3 @@
-# mdpAgents.py
-# parsons/20-nov-2017
-#
-# Version 1
-#
-# The starting point for CW2.
-#
-# Intended to work with the PacMan AI projects from:
-#
-# http://ai.berkeley.edu/
-#
-# These use a simple API that allow us to control Pacman's interaction with
-# the environment adding a layer on top of the AI Berkeley code.
-#
-# As required by the licensing agreement for the PacMan AI we have:
-#
 # Licensing Information:  You are free to use or extend these projects for
 # educational purposes provided that (1) you do not distribute or publish
 # solutions, (2) you retain this notice, and (3) you provide clear
@@ -25,9 +9,6 @@
 # Student side autograding was added by Brad Miller, Nick Hay, and
 # Pieter Abbeel (pabbeel@cs.berkeley.edu).
 
-# The agent here is was written by Simon Parsons, based on the code in
-# pacmanAgents.py
-
 from pacman import Directions
 from game import Agent
 import api
@@ -35,7 +16,7 @@ import random
 import game
 import util
 
-# extra libraries I am using:
+# libraries I am using: (all are part of python 2.7 standard)
 import copy
 import math
 from collections import deque
@@ -54,19 +35,19 @@ class Environment(Agent):
         self.maze_shape = [0, 0]
 
     # find where the remaining food currently is
-    def update_food_locations(self, state):
+    def updateFoodLocations(self, state):
         self.all_food_locations = api.food(state)
     
     # find where the remaining capsules currently are
-    def update_capsule_locations(self, state):
+    def updateCapsuleLocations(self, state):
         self.capsule_locations = api.capsules(state)
     
     # find where the ghosts currently are
-    def update_ghost_locations(self, state):
+    def updateGhostLocations(self, state):
         self.ghost_locations = api.ghosts(state)
     
     # store the size of the current maze (excluding borders)
-    def get_maze_shape(self, state):
+    def getMazeShape(self, state):
         if self.maze_shape == [0, 0]:
             for i in self.open_locations:
                 if i[0] >= self.maze_shape[0]:
@@ -75,22 +56,31 @@ class Environment(Agent):
                     self.maze_shape[1] = i[1]
 
     # find all locations that pacman can move to
-    def get_empty_locations(self, state):
+    def getEmptyLocations(self, state):
         self.wall_locations = api.walls(state)
 
         if self.open_locations == []:
-            for i in range(0, self.wall_locations[len(self.wall_locations) - 1][0]):
-                for j in range(0, self.wall_locations[len(self.wall_locations) - 1][1]):
+            # for every point in the maze: if that point is not present in the
+            # wall locations list then add it to the open locations list
+
+            for i in range(0, self.wall_locations[len(self.wall_locations) - 1][0]): # uses the value of the last element in the wall
+                for j in range(0, self.wall_locations[len(self.wall_locations) - 1][1]): # locations list to determine the size of the maze
                     if (i, j) not in self.wall_locations:
                         self.open_locations.append((i, j))
     
     # find the location of the closest piece of food
-    def get_closest_food(self, state):
+    def getClosestFood(self, state):
         dists = []
+        # store the manhattan distances between pacman and all of the food currently in the maze
         for i in self.all_food_locations:
             dists.append(util.manhattanDistance(api.whereAmI(state), i))
+
+        # and set that with the smallest value to the closest food currently
         self.closest_food = min(dists)
         
+        # since the list that stores the distances and the food locations are 1-1, you simply find the index
+        # of the minimum value in the distance list and will correspond to the correct food location in the
+        # food location list
         closest_index = 0
         for i in dists:
             if i == self.closest_food:
@@ -105,52 +95,91 @@ class Environment(Agent):
 # class to handle all value iteration information and instructions
 class ValueIterator(Agent):
     def __init__(self):
-        self.value_matrix = []
-        self.value_table = []
-        self.gamma = 0.9
-        self.reward = -0.04
+        # initializing important variables
+        self.value_matrix_b = []
+        self.value_matrix_a = []
+        self.nxt_loc = []
+        self.gamma = 0.5
+        self.reward = -0.1
 
     # function to predict the next location of a ghost (used to help steer pacman away from ghosts):
     # next = ((previous - present) * -1) + present
     # where previous and present are 2-tuples or 2 element lists : (x, y)
-    def get_ghost_next_location(self, previous, present):
-        return [((math.floor(previous[0]) - math.floor(present[0])) * -1) + math.floor(present[0]), ((math.floor(previous[1]) - math.floor(present[1])) * -1) + math.floor(present[1])]
+    def getNextGhostLocation(self, previous, present):
+        return [((math.floor(previous[0]) - math.floor(present[0])) * -1) + math.floor(present[0]),
+                ((math.floor(previous[1]) - math.floor(present[1])) * -1) + math.floor(present[1])]
 
-    # value table is a 1-1 representation of the current maze but rotated 90 degrees clockwise
-    def ammend_value_table(self, state, maze_shape, wall_locations, closest_food, ghost_locations, ghost_prev_locations, capsule_locations):
-        for i in range(0, maze_shape[0] + 2):
-            self.value_table.append([])
-            for j in range(0, maze_shape[1] + 2):
-                self.value_table[i].append(0)
-                if (i, j) in wall_locations:
-                    self.value_table[i][j] = None
-                if (i, j) == closest_food:
-                    self.value_table[i][j] = 1
-                if (i, j) in ghost_locations:
-                    self.value_table[i][j] = -1
-                if(i, j) in capsule_locations:
-                    self.value_table[i][j] = 1
+    # my value matricies are 1-1 a representation of the current maze but rotated 90 degrees clockwise
+    # e.g
+    # if real map is:              the value matricies represent it as such:
+    #                          (NOT TO SCALE)
+    #  ##################                              ##################
+    #  #                #                              #                #
+    #  #    ########    #                              #    ########    #
+    #  #    #           #                              #    #      #    #
+    #  #    ########    #                              #    #      #    #
+    #  #                #                              #                #
+    #  ##################                              ##################
+    #  
+
+    # get the intial set up of the value matrix (i.e. get iteration 0)
+    def getInitialValueMatrix(self, state, maze_shape, wall_locations,
+                              closest_food, ghost_locations, ghost_prev_locations,
+                              capsule_locations):
         
-        nxt_loc = []
+        # uses the maze_shape variable to construct the matrix
+        for i in range(0, maze_shape[0] + 2):
+            self.value_matrix_a.append([])
+            for j in range(0, maze_shape[1] + 2):
+                self.value_matrix_a[i].append(0)
+
+                # place wall values in matrix
+                if (i, j) in wall_locations:
+                    self.value_matrix_a[i][j] = None
+                # place closest food value in matrix
+                if (i, j) == closest_food:
+                    self.value_matrix_a[i][j] = 1
+                # place ghost values in matrix
+                if (i, j) in ghost_locations:
+                    self.value_matrix_a[i][j] = -1
+                # place capsule values in matrix
+                if(i, j) in capsule_locations:
+                    self.value_matrix_a[i][j] = 1
+        
+        # uses the getNextLocation() function to predict the positions of ghost in s' 
+        # and place a value in that location of the value matrix
+        # (the int() and math.ceil() are to ensure that these values are compatible
+        # with list indices)
+        self.nxt_loc = []
         if ghost_prev_locations != []:
-            for i in range(0, len(ghost_locations)):
-                nxt_loc = self.get_ghost_next_location(ghost_prev_locations[i], ghost_locations[i])
-                if int(nxt_loc[0]) <= maze_shape[1] and int(nxt_loc[1]) <= maze_shape[0] and self.value_table[int(math.ceil(nxt_loc[0]))][int(math.ceil(nxt_loc[1]))] != None:
-                    self.value_table[int(math.ceil(nxt_loc[0]))][int(math.ceil(nxt_loc[1]))] = -1
+            # for each ghost, predict it's next location and place it in the matrix
+            # ensuring that walls are not overwritten
+            for i in range(0, len(ghost_prev_locations)):
+                self.nxt_loc = self.getNextGhostLocation(ghost_prev_locations[i], ghost_locations[i])
+                if( int(self.nxt_loc[0]) <= maze_shape[1] and int(self.nxt_loc[1]) <= maze_shape[0] 
+                   and self.value_matrix_a[int(math.ceil(self.nxt_loc[0]))][int(math.ceil(self.nxt_loc[1]))] != None ):
+
+                    self.value_matrix_a[int(math.ceil(self.nxt_loc[0]))][int(math.ceil(self.nxt_loc[1]))] = -1
                     
         
-                
-    def iterate_value_matrix(self, maze_shape, wall_locations, closest_food, ghost_locations, capsule_locations, iterations):
-        self.value_matrix = copy.deepcopy(self.value_table)
+    # value iteration function
+    def iterateValues(self, maze_shape, wall_locations, closest_food, ghost_locations, capsule_locations, iterations):
+        self.value_matrix_b = copy.deepcopy(self.value_matrix_a)
+        # for k iterations
         for k in range(0 , iterations):     
+            # for every value in the value matrix
             for i in range(0, maze_shape[0] + 2):
                 for j in range(0, maze_shape[1] + 2):
-                    if self.value_matrix[i][j] != None:
-                        neighbours = [self.value_table[i - 1][j], # left
-                                      self.value_table[i][j + 1], # up
-                                      self.value_table[i + 1][j], # right
-                                      self.value_table[i][j - 1]] # down
+
+                    # if the current value isn't a wall
+                    if self.value_matrix_b[i][j] != None:
+                        # define the current value's neighbours
+                        neighbours = [self.value_matrix_a[i - 1][j], # left
+                                      self.value_matrix_a[i][j + 1], # up
+                                      self.value_matrix_a[i + 1][j], # right
+                                      self.value_matrix_a[i][j - 1]] # down
                         
+                        # store the coefficients in a deque
                         coefficients = deque([0.1,
                                               0.8,
                                               0.1,
@@ -158,6 +187,7 @@ class ValueIterator(Agent):
 
                         values = []
 
+                        # if there are walls in the neighbourhood, adjust the coefficients accordingly
                         for m in range(0, 4):
                             surp_coefficient = 0
                             if neighbours[m] == None:
@@ -166,8 +196,9 @@ class ValueIterator(Agent):
                                 else:
                                     surp_coefficient += 0.1
 
-                                neighbours[m] = self.value_table[i][j]
+                                neighbours[m] = self.value_matrix_a[i][j]
 
+                        # store probabilisic utilities for each s' (P(s'|s,a) * U(s'))
                         for k in range(0, 4):
                             values.append(sum([neighbours[0] * coefficients[0],
                                                neighbours[1] * coefficients[1],
@@ -176,31 +207,39 @@ class ValueIterator(Agent):
                     
                             coefficients.rotate(1)
                         
-                        if (i, j) not in wall_locations and (i, j) != closest_food and (i, j) not in ghost_locations and (i, j) not in capsule_locations:
-                            self.value_matrix[i][j] = self.reward + (self.gamma * max(values))
-            self.value_table = copy.deepcopy(self.value_matrix)
-        
+                        # find utility of current value
+                        if( (i, j) not in wall_locations and (i, j) != closest_food 
+                           and (i, j) not in ghost_locations and (i, j) not in capsule_locations
+                           and [i, j] != self.nxt_loc ):
 
+                            # U(s) = R(s) + gamma * max(P(s'|s,a) * U(s'))
+                            self.value_matrix_b[i][j] = self.reward + (self.gamma * max(values))
+
+
+            self.value_matrix_a = copy.deepcopy(self.value_matrix_b)
+        
+# actual MDPAgent class
 class MDPAgent(Agent):
 
-
+    # initialize environment and value iterator classes
     def __init__(self):
         self.env = Environment()
         self.vi = ValueIterator()
-
+    
+    # initialize object locations and initial state of value matrix
     def registerInitialState(self, state):
-        self.env.update_food_locations(state)
-        self.env.get_closest_food(state)
-        self.env.update_capsule_locations(state)
-        self.env.get_empty_locations(state)
-        self.env.get_maze_shape(state)
-        self.env.update_ghost_locations(state)
+        self.env.updateFoodLocations(state)
+        self.env.getClosestFood(state)
+        self.env.updateCapsuleLocations(state)
+        self.env.getEmptyLocations(state)
+        self.env.getMazeShape(state)
+        self.env.updateGhostLocations(state)
 
-        self.vi.ammend_value_table(state, self.env.maze_shape, self.env.wall_locations, 
+        self.vi.getInitialValueMatrix(state, self.env.maze_shape, self.env.wall_locations, 
                                     self.env.closest_food, self.env.ghost_locations,
                                     self.env.ghost_prev_locations, self.env.capsule_locations)
-
-
+        
+    # reset all values at end of game
     def final(self, state):
         self.env.all_food_locations = []
         self.env.closest_food = []
@@ -211,19 +250,18 @@ class MDPAgent(Agent):
         self.env.open_locations = []
         self.env.maze_shape = [0, 0]
 
-        self.vi.value_matrix = []
-        self.vi.value_table = []
-        self.vi.gamma = 0.99
-        self.vi.reward = -0.04
+        self.vi.value_matrix_b = []
+        self.vi.value_matrix_a = []
     
-    def get_next_direction(self, state, value_matrix, pacman_location):
+    # get the next direction to take (max value of pacman's current neighbours)
+    def getNextDirection(self, state, value_matrix_b, pacman_location):
         i = pacman_location[0]
         j = pacman_location[1]
         
-        neighbours = {'left': self.vi.value_matrix[i - 1][j], # left
-                      'right': self.vi.value_matrix[i + 1][j], # right
-                      'down': self.vi.value_matrix[i][j - 1], # down
-                      'up': self.vi.value_matrix[i][j + 1]} # up
+        neighbours = {'left': self.vi.value_matrix_b[i - 1][j],
+                      'right': self.vi.value_matrix_b[i + 1][j],
+                      'down': self.vi.value_matrix_b[i][j - 1],
+                      'up': self.vi.value_matrix_b[i][j + 1]}
         
         if max(neighbours, key=neighbours.get) == 'left':
             return Directions.WEST
@@ -237,31 +275,35 @@ class MDPAgent(Agent):
         elif max(neighbours, key=neighbours.get) == 'up':
             return Directions.NORTH
             
-
     def getAction(self, state):
-        self.vi.value_matrix = []
-        self.vi.value_table = []
+        # reset the value matrix
+        self.vi.value_matrix_b = []
+        self.vi.value_matrix_a = []
 
-        self.env.update_food_locations(state)
-        self.env.get_closest_food(state)
-        self.env.update_capsule_locations(state)
-        self.env.get_empty_locations(state)
-        self.env.get_maze_shape(state)
-        self.env.update_ghost_locations(state)
+        # update the locations of objects
+        self.env.updateFoodLocations(state)
+        self.env.getClosestFood(state)
+        self.env.updateCapsuleLocations(state)
+        self.env.getEmptyLocations(state)
+        self.env.getMazeShape(state)
+        self.env.updateGhostLocations(state)
 
-        self.vi.ammend_value_table(state, self.env.maze_shape, self.env.wall_locations, 
+        # update initial value matrix
+        self.vi.getInitialValueMatrix(state, self.env.maze_shape, self.env.wall_locations, 
                                     self.env.closest_food, self.env.ghost_locations,
                                     self.env.ghost_prev_locations, self.env.capsule_locations)
 
-
-        self.vi.iterate_value_matrix(self.env.maze_shape, self.env.wall_locations, 
+        # iterate value matrix
+        self.vi.iterateValues(self.env.maze_shape, self.env.wall_locations, 
                                     self.env.closest_food, self.env.ghost_locations,
                                     self.env.capsule_locations, 20)
-        
+
+        # set ghost previous locations (for predicting ghost s')
         self.env.ghost_prev_locations = api.ghosts(state)
 
         legal = api.legalActions(state)
         if Directions.STOP in legal:
             legal.remove(Directions.STOP)
 
-        return api.makeMove(self.get_next_direction(state, self.vi.value_matrix, api.whereAmI(state)), legal)
+        # make the move
+        return api.makeMove(self.getNextDirection(state, self.vi.value_matrix_b, api.whereAmI(state)), legal)
